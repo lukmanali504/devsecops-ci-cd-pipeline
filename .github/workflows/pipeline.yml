@@ -48,22 +48,34 @@ jobs:
         pip install semgrep
 
     # =====================================================
-    # RUN SEMGREP (NON-BLOCKING)
+    # RUN SEMGREP (NON BLOCKING)
     # =====================================================
 
     - name: Run Semgrep Security Scan
       run: |
 
         echo "=================================================="
-        echo "RUNNING SEMGREP SOURCE CODE SECURITY SCAN"
+        echo "RUNNING SEMGREP SOURCE CODE SCAN"
         echo "=================================================="
 
         semgrep --config=auto app.py || true
 
         echo "=================================================="
         echo "SEMGREP SCAN COMPLETED"
-        echo "Pipeline moving to next security layer."
         echo "=================================================="
+
+    # =====================================================
+    # INSTALL GITLEAKS
+    # =====================================================
+
+    - name: Install Gitleaks
+      run: |
+
+        wget https://github.com/gitleaks/gitleaks/releases/download/v8.18.1/gitleaks_8.18.1_linux_x64.tar.gz
+
+        tar -xzf gitleaks_8.18.1_linux_x64.tar.gz
+
+        sudo mv gitleaks /usr/local/bin/
 
     # =====================================================
     # RUN GITLEAKS (BLOCKING)
@@ -76,10 +88,8 @@ jobs:
         echo "RUNNING GITLEAKS SECRET SCAN"
         echo "=================================================="
 
-        docker run --rm \
-        -v ${{ github.workspace }}:/path \
-        zricethezav/gitleaks:latest detect \
-        --source="/path" \
+        gitleaks detect \
+        --source . \
         --verbose \
         --redact \
         --exit-code 1
@@ -97,13 +107,13 @@ jobs:
         echo "=================================================="
         echo "Reason:"
         echo "Gitleaks detected hardcoded AWS credentials"
-        echo "inside app.py source code."
+        echo "inside application source code."
         echo "=================================================="
-        echo "Security Enforcement:"
-        echo "1. Semgrep  - SAST Source Code Scan"
+        echo "Security Enforcement Layers:"
+        echo "1. Semgrep  - Static Application Security Testing"
         echo "2. Gitleaks - Secret Detection"
         echo "=================================================="
-        echo "Hardcoded secrets violate enterprise"
+        echo "Hardcoded credentials violate enterprise"
         echo "DevSecOps security policies."
         echo "=================================================="
         echo "Recommendation:"
@@ -118,6 +128,7 @@ jobs:
 
     - name: Create Secure Terraform File
       run: |
+
         mkdir -p terraform
 
         cat > terraform/main.tf << 'EOF'
@@ -152,7 +163,7 @@ jobs:
         pip install checkov
 
     # =====================================================
-    # RUN CHECKOV
+    # RUN CHECKOV (NON BLOCKING)
     # =====================================================
 
     - name: Run Checkov Scan
@@ -165,7 +176,9 @@ jobs:
 
     - name: Install Trivy
       run: |
+
         sudo apt-get update
+
         sudo apt-get install wget apt-transport-https gnupg lsb-release -y
 
         wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | \
@@ -178,14 +191,16 @@ jobs:
         sudo tee /etc/apt/sources.list.d/trivy.list
 
         sudo apt-get update
+
         sudo apt-get install trivy -y
 
     # =====================================================
-    # RUN TRIVY SCAN
+    # RUN TRIVY FILE SYSTEM SCAN
     # =====================================================
 
     - name: Run Dependency Scan
       run: |
+
         trivy fs . --severity HIGH,CRITICAL
 
 # =========================================================
@@ -234,6 +249,7 @@ jobs:
 
     - name: Build Docker Image
       run: |
+
         docker build -t ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest .
 
     # =====================================================
@@ -242,6 +258,7 @@ jobs:
 
     - name: Push Docker Image
       run: |
+
         docker push ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
 
 # =========================================================
@@ -265,7 +282,7 @@ jobs:
         secrets: |
           secret/data/dockerhub repo | DOCKER_REPOSITORY
 
-    - name: Deploy Dev Container
+    - name: Deploy Development Container
       run: |
 
         docker rm -f dev-container || true

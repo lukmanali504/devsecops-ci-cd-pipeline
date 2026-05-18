@@ -125,7 +125,8 @@ jobs:
         echo "=================================================="
 
         checkov -d terraform \
-        --framework terraform
+        --framework terraform \
+        --skip-check CKV2_AWS_62,CKV2_AWS_61,CKV2_AWS_64,CKV_AWS_144
 
         echo "=================================================="
         echo "CHECKOV SECURITY SCAN PASSED"

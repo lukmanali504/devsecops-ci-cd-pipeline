@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 env:
-  IMAGE_NAME: devsecops-app
+  IMAGE_NAME: devsecops-ci-cd-pipeline
 
 jobs:
 
@@ -60,7 +60,9 @@ jobs:
         docker run --rm \
         -v ${{ github.workspace }}:/path \
         zricethezav/gitleaks:latest detect \
-        --source="/path"
+        --source="/path" \
+        --verbose \
+        --redact
 
     # =====================================================
     # CREATE SECURE TERRAFORM FILE
@@ -139,7 +141,7 @@ jobs:
 
     - name: Run Checkov Scan
       run: |
-        checkov -d . --soft-fail
+        checkov -d .
 
     # =====================================================
     # INSTALL TRIVY
@@ -201,8 +203,8 @@ jobs:
 
         secrets: |
           secret/data/dockerhub username | DOCKER_USERNAME ;
-          secret/data/dockerhub password | DOCKER_PASSWORD ;
-          secret/data/dockerhub repository | DOCKER_REPOSITORY
+          secret/data/dockerhub token | DOCKER_PASSWORD ;
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
 
     # =====================================================
     # LOGIN TO DOCKER HUB
@@ -280,7 +282,7 @@ jobs:
         token: ${{ secrets.VAULT_TOKEN }}
 
         secrets: |
-          secret/data/dockerhub repository | DOCKER_REPOSITORY
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
 
     - name: Pull Docker Image
       run: |
@@ -317,7 +319,7 @@ jobs:
         token: ${{ secrets.VAULT_TOKEN }}
 
         secrets: |
-          secret/data/dockerhub repository | DOCKER_REPOSITORY
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
 
     - name: Pull Docker Image
       run: |
@@ -354,7 +356,7 @@ jobs:
         token: ${{ secrets.VAULT_TOKEN }}
 
         secrets: |
-          secret/data/dockerhub repository | DOCKER_REPOSITORY
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
 
     - name: Pull Docker Image
       run: |

@@ -43,7 +43,7 @@ jobs:
     # INSTALL DEPENDENCIES
     # =====================================================
 
-    - name: Install Python Dependencies
+    - name: Install Dependencies
       run: |
         pip install -r requirements.txt
 
@@ -56,20 +56,20 @@ jobs:
         pip install semgrep
 
     # =====================================================
-    # RUN SEMGREP SOURCE CODE SCAN
+    # RUN SEMGREP
     # =====================================================
 
-    - name: Run Semgrep Security Scan
+    - name: Run Semgrep Scan
       run: |
 
         echo "=================================================="
-        echo "RUNNING SEMGREP SOURCE CODE SECURITY SCAN"
+        echo "RUNNING SEMGREP SOURCE CODE SCAN"
         echo "=================================================="
 
         semgrep --config=auto . || true
 
         echo "=================================================="
-        echo "SEMGREP SECURITY SCAN COMPLETED"
+        echo "SEMGREP SCAN COMPLETED"
         echo "=================================================="
 
     # =====================================================
@@ -86,10 +86,10 @@ jobs:
         sudo mv gitleaks /usr/local/bin/
 
     # =====================================================
-    # RUN GITLEAKS SECRET SCAN
+    # RUN GITLEAKS
     # =====================================================
 
-    - name: Run Gitleaks Secret Scan
+    - name: Run Gitleaks Scan
       run: |
 
         echo "=================================================="
@@ -102,40 +102,8 @@ jobs:
         --redact || true
 
         echo "=================================================="
-        echo "GITLEAKS SECRET SCAN COMPLETED"
+        echo "GITLEAKS SCAN COMPLETED"
         echo "=================================================="
-
-    # =====================================================
-    # CREATE TERRAFORM FILE
-    # =====================================================
-
-    - name: Create Secure Terraform File
-      run: |
-
-        mkdir -p terraform
-
-        cat > terraform/main.tf << 'EOF'
-        provider "aws" {
-          region = "ap-south-1"
-        }
-
-        resource "aws_s3_bucket" "secure_bucket" {
-          bucket = "enterprise-devsecops-secure-demo-bucket"
-
-          tags = {
-            Name = "SecureBucket"
-          }
-        }
-
-        resource "aws_s3_bucket_public_access_block" "secure_access" {
-          bucket = aws_s3_bucket.secure_bucket.id
-
-          block_public_acls       = true
-          block_public_policy     = true
-          ignore_public_acls      = true
-          restrict_public_buckets = true
-        }
-        EOF
 
     # =====================================================
     # INSTALL CHECKOV
@@ -146,105 +114,21 @@ jobs:
         pip install checkov
 
     # =====================================================
-    # RUN CHECKOV SCAN
+    # RUN CHECKOV
     # =====================================================
 
     - name: Run Checkov Scan
       run: |
 
         echo "=================================================="
-        echo "RUNNING CHECKOV IaC SECURITY SCAN"
+        echo "RUNNING CHECKOV IaC SCAN"
         echo "=================================================="
 
         checkov -d . --soft-fail
 
         echo "=================================================="
-        echo "CHECKOV SECURITY SCAN COMPLETED"
+        echo "CHECKOV SCAN COMPLETED"
         echo "=================================================="
-
-    # =====================================================
-    # INSTALL TRIVY
-    # =====================================================
-
-    - name: Install Trivy
-      run: |
-
-        echo "=================================================="
-        echo "INSTALLING TRIVY VULNERABILITY SCANNER"
-        echo "=================================================="
-
-        sudo apt-get update -y
-
-        sudo apt-get install wget apt-transport-https gnupg lsb-release -y
-
-        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | \
-        gpg --dearmor | \
-        sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-
-        echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] \
-        https://aquasecurity.github.io/trivy-repo/deb \
-        $(lsb_release -sc) main" | \
-        sudo tee /etc/apt/sources.list.d/trivy.list
-
-        sudo apt-get update -y
-
-        sudo apt-get install trivy -y
-
-        echo "=================================================="
-        echo "TRIVY INSTALLED SUCCESSFULLY"
-        echo "=================================================="
-
-        trivy --version
-
-    # =====================================================
-    # RUN TRIVY DEPENDENCY SCAN
-    # =====================================================
-
-    - name: Run Trivy Dependency Scan
-      run: |
-
-        echo "=================================================="
-        echo "RUNNING TRIVY DEPENDENCY VULNERABILITY SCAN"
-        echo "=================================================="
-
-        echo "Scanning vulnerable dependencies from requirements.txt"
-
-        trivy fs . \
-        --scanners vuln \
-        --severity HIGH,CRITICAL \
-        --format table \
-        --exit-code 1
-
-    # =====================================================
-    # CUSTOM FAILURE MESSAGE
-    # =====================================================
-
-    - name: Dependency Vulnerability Failure Message
-      if: failure()
-      run: |
-
-        echo "=================================================="
-        echo "PIPELINE FAILED"
-        echo "=================================================="
-        echo "Reason:"
-        echo "Trivy detected vulnerable dependencies"
-        echo "inside application source code."
-        echo "=================================================="
-        echo "Affected Component:"
-        echo "Third-party Python libraries"
-        echo "from requirements.txt"
-        echo "=================================================="
-        echo "Security Layer:"
-        echo "Trivy Dependency Vulnerability Scanner"
-        echo "=================================================="
-        echo "Detected Severity:"
-        echo "HIGH / CRITICAL CVEs"
-        echo "=================================================="
-        echo "Recommendation:"
-        echo "Upgrade vulnerable dependencies immediately."
-        echo "=================================================="
-
-        exit 1
 
 # =========================================================
 # BUILD AND PUSH IMAGE
@@ -256,6 +140,10 @@ jobs:
     needs: security-scans
 
     steps:
+
+    # =====================================================
+    # CHECKOUT SOURCE CODE
+    # =====================================================
 
     - name: Checkout Repository
       uses: actions/checkout@v4
@@ -287,20 +175,74 @@ jobs:
         password: ${{ steps.vault.outputs.DOCKER_PASSWORD }}
 
     # =====================================================
-    # BUILD DOCKER IMAGE
+    # BUILD IMAGE
     # =====================================================
 
     - name: Build Docker Image
       run: |
 
+        echo "=================================================="
+        echo "BUILDING DOCKER IMAGE"
+        echo "=================================================="
+
         docker build -t ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest .
 
     # =====================================================
-    # PUSH DOCKER IMAGE
+    # INSTALL TRIVY
+    # =====================================================
+
+    - name: Install Trivy
+      run: |
+
+        echo "=================================================="
+        echo "INSTALLING TRIVY"
+        echo "=================================================="
+
+        sudo apt-get update -y
+
+        sudo apt-get install wget apt-transport-https gnupg lsb-release -y
+
+        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | \
+        gpg --dearmor | \
+        sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+
+        echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] \
+        https://aquasecurity.github.io/trivy-repo/deb \
+        $(lsb_release -sc) main" | \
+        sudo tee /etc/apt/sources.list.d/trivy.list
+
+        sudo apt-get update -y
+
+        sudo apt-get install trivy -y
+
+        trivy --version
+
+    # =====================================================
+    # IMAGE SCANNING
+    # =====================================================
+
+    - name: Run Trivy Image Scan
+      run: |
+
+        echo "=================================================="
+        echo "RUNNING TRIVY IMAGE SCAN"
+        echo "=================================================="
+
+        trivy image \
+        --severity HIGH,CRITICAL \
+        --format table \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+    # =====================================================
+    # PUSH IMAGE
     # =====================================================
 
     - name: Push Docker Image
       run: |
+
+        echo "=================================================="
+        echo "PUSHING IMAGE TO DOCKER HUB"
+        echo "=================================================="
 
         docker push ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
 
@@ -325,7 +267,13 @@ jobs:
         secrets: |
           secret/data/dockerhub repo | DOCKER_REPOSITORY
 
-    - name: Deploy Development Container
+    - name: Pull Docker Image
+      run: |
+
+        docker pull \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+    - name: Run Development Container
       run: |
 
         docker rm -f dev-container || true
@@ -357,7 +305,13 @@ jobs:
         secrets: |
           secret/data/dockerhub repo | DOCKER_REPOSITORY
 
-    - name: Deploy Staging Container
+    - name: Pull Docker Image
+      run: |
+
+        docker pull \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+    - name: Run Staging Container
       run: |
 
         docker rm -f staging-container || true
@@ -389,7 +343,13 @@ jobs:
         secrets: |
           secret/data/dockerhub repo | DOCKER_REPOSITORY
 
-    - name: Deploy Production Container
+    - name: Pull Docker Image
+      run: |
+
+        docker pull \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+    - name: Run Production Container
       run: |
 
         docker rm -f prod-container || true

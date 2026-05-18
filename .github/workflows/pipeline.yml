@@ -1,0 +1,389 @@
+name: Enterprise DevSecOps Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: devsecops-ci-cd-pipeline
+
+jobs:
+
+# =========================================================
+# SECURITY SCANS
+# =========================================================
+
+  security-scans:
+    name: Security Scans
+    runs-on: ubuntu-latest
+
+    steps:
+
+    # =====================================================
+    # CHECKOUT SOURCE CODE
+    # =====================================================
+
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    # =====================================================
+    # SETUP PYTHON
+    # =====================================================
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    # =====================================================
+    # INSTALL DEPENDENCIES
+    # =====================================================
+
+    - name: Install Dependencies
+      run: |
+        pip install -r requirements.txt
+
+    # =====================================================
+    # INSTALL SEMGREP
+    # =====================================================
+
+    - name: Install Semgrep
+      run: |
+        pip install semgrep
+
+    # =====================================================
+    # RUN SEMGREP
+    # =====================================================
+
+    - name: Run Semgrep Scan
+      run: |
+
+        echo "=================================================="
+        echo "RUNNING SEMGREP SOURCE CODE SCAN"
+        echo "=================================================="
+
+        semgrep --config=auto . || true
+
+        echo "=================================================="
+        echo "SEMGREP SCAN COMPLETED"
+        echo "=================================================="
+
+    # =====================================================
+    # INSTALL GITLEAKS
+    # =====================================================
+
+    - name: Install Gitleaks
+      run: |
+
+        wget https://github.com/gitleaks/gitleaks/releases/download/v8.18.1/gitleaks_8.18.1_linux_x64.tar.gz
+
+        tar -xzf gitleaks_8.18.1_linux_x64.tar.gz
+
+        sudo mv gitleaks /usr/local/bin/
+
+    # =====================================================
+    # RUN GITLEAKS
+    # =====================================================
+
+    - name: Run Gitleaks Scan
+      run: |
+
+        echo "=================================================="
+        echo "RUNNING GITLEAKS SECRET SCAN"
+        echo "=================================================="
+
+        gitleaks detect \
+        --source . \
+        --verbose \
+        --redact || true
+
+        echo "=================================================="
+        echo "GITLEAKS SCAN COMPLETED"
+        echo "=================================================="
+
+    # =====================================================
+    # INSTALL CHECKOV
+    # =====================================================
+
+    - name: Install Checkov
+      run: |
+        pip install checkov
+
+    # =====================================================
+    # RUN CHECKOV
+    # =====================================================
+
+    - name: Run Checkov Scan
+      run: |
+
+        echo "=================================================="
+        echo "RUNNING CHECKOV IaC SECURITY SCAN"
+        echo "=================================================="
+
+        checkov -d . --soft-fail
+
+        echo "=================================================="
+        echo "CHECKOV SCAN COMPLETED"
+        echo "=================================================="
+
+# =========================================================
+# BUILD IMAGE AND IMAGE SECURITY SCAN
+# =========================================================
+
+  build-and-image-scan:
+    name: Build Docker Image And Scan
+    runs-on: ubuntu-latest
+    needs: security-scans
+
+    steps:
+
+    # =====================================================
+    # CHECKOUT SOURCE CODE
+    # =====================================================
+
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    # =====================================================
+    # IMPORT VAULT SECRETS
+    # =====================================================
+
+    - name: Import Secrets from Vault
+      id: vault
+      uses: hashicorp/vault-action@v2
+      with:
+        url: ${{ secrets.VAULT_ADDR }}
+        token: ${{ secrets.VAULT_TOKEN }}
+        tlsSkipVerify: true
+
+        secrets: |
+          secret/data/dockerhub username | DOCKER_USERNAME ;
+          secret/data/dockerhub token | DOCKER_PASSWORD ;
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
+
+    # =====================================================
+    # LOGIN TO DOCKER HUB
+    # =====================================================
+
+    - name: Docker Login
+      uses: docker/login-action@v3
+      with:
+        username: ${{ steps.vault.outputs.DOCKER_USERNAME }}
+        password: ${{ steps.vault.outputs.DOCKER_PASSWORD }}
+
+    # =====================================================
+    # BUILD DOCKER IMAGE
+    # =====================================================
+
+    - name: Build Docker Image
+      run: |
+
+        echo "=================================================="
+        echo "BUILDING DOCKER IMAGE"
+        echo "=================================================="
+
+        docker build \
+        -t ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest .
+
+    # =====================================================
+    # INSTALL TRIVY
+    # =====================================================
+
+    - name: Install Trivy
+      run: |
+
+        echo "=================================================="
+        echo "INSTALLING TRIVY"
+        echo "=================================================="
+
+        sudo apt-get update -y
+
+        sudo apt-get install wget apt-transport-https gnupg lsb-release -y
+
+        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | \
+        gpg --dearmor | \
+        sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+
+        echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] \
+        https://aquasecurity.github.io/trivy-repo/deb \
+        $(lsb_release -sc) main" | \
+        sudo tee /etc/apt/sources.list.d/trivy.list
+
+        sudo apt-get update -y
+
+        sudo apt-get install trivy -y
+
+        trivy --version
+
+    # =====================================================
+    # RUN TRIVY IMAGE SCAN
+    # =====================================================
+
+    - name: Run Trivy Docker Image Scan
+      run: |
+
+        echo "=================================================="
+        echo "RUNNING TRIVY DOCKER IMAGE SECURITY SCAN"
+        echo "=================================================="
+
+        trivy image \
+        --severity HIGH,CRITICAL \
+        --format table \
+        --exit-code 1 \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+    # =====================================================
+    # FAILURE MESSAGE
+    # =====================================================
+
+    - name: Docker Image Vulnerability Failure Message
+      if: failure()
+      run: |
+
+        echo "=================================================="
+        echo "PIPELINE FAILED"
+        echo "=================================================="
+        echo "Reason:"
+        echo "Trivy detected vulnerable Docker image."
+        echo "=================================================="
+        echo "Detected Issues:"
+        echo "- Vulnerable base image"
+        echo "- Vulnerable OS packages"
+        echo "- HIGH / CRITICAL CVEs"
+        echo "=================================================="
+        echo "Security Layer:"
+        echo "Trivy Docker Image Vulnerability Scanner"
+        echo "=================================================="
+
+        exit 1
+
+    # =====================================================
+    # PUSH IMAGE
+    # =====================================================
+
+    - name: Push Docker Image
+      run: |
+
+        docker push \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+# =========================================================
+# DEPLOY DEVELOPMENT ENVIRONMENT
+# =========================================================
+
+  deploy-development:
+    name: Deploy Development Environment
+    runs-on: self-hosted
+    needs: build-and-image-scan
+
+    steps:
+
+    - name: Import Vault Secret
+      id: vault
+      uses: hashicorp/vault-action@v2
+      with:
+        url: ${{ secrets.VAULT_ADDR }}
+        token: ${{ secrets.VAULT_TOKEN }}
+        tlsSkipVerify: true
+
+        secrets: |
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
+
+    - name: Pull Docker Image
+      run: |
+
+        docker pull \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+    - name: Run Development Container
+      run: |
+
+        docker rm -f dev-container || true
+
+        docker run -d \
+        --name dev-container \
+        -p 5001:5000 \
+        -e ENVIRONMENT=DEVELOPMENT \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+# =========================================================
+# DEPLOY STAGING ENVIRONMENT
+# =========================================================
+
+  deploy-staging:
+    name: Deploy Staging Environment
+    runs-on: self-hosted
+    needs: deploy-development
+
+    steps:
+
+    - name: Import Vault Secret
+      id: vault
+      uses: hashicorp/vault-action@v2
+      with:
+        url: ${{ secrets.VAULT_ADDR }}
+        token: ${{ secrets.VAULT_TOKEN }}
+        tlsSkipVerify: true
+
+        secrets: |
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
+
+    - name: Pull Docker Image
+      run: |
+
+        docker pull \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+    - name: Run Staging Container
+      run: |
+
+        docker rm -f staging-container || true
+
+        docker run -d \
+        --name staging-container \
+        -p 5002:5000 \
+        -e ENVIRONMENT=STAGING \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+# =========================================================
+# DEPLOY PRODUCTION ENVIRONMENT
+# =========================================================
+
+  deploy-production:
+    name: Deploy Production Environment
+    runs-on: self-hosted
+    needs: deploy-staging
+
+    steps:
+
+    - name: Import Vault Secret
+      id: vault
+      uses: hashicorp/vault-action@v2
+      with:
+        url: ${{ secrets.VAULT_ADDR }}
+        token: ${{ secrets.VAULT_TOKEN }}
+        tlsSkipVerify: true
+
+        secrets: |
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
+
+    - name: Pull Docker Image
+      run: |
+
+        docker pull \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+    - name: Run Production Container
+      run: |
+
+        docker rm -f prod-container || true
+
+        docker run -d \
+        --name prod-container \
+        -p 5003:5000 \
+        -e ENVIRONMENT=PRODUCTION \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest

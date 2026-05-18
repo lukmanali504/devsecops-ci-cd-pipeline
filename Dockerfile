@@ -1,9 +1,8 @@
-FROM python:3.7
+FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN apt-get update && \
-    apt-get install -y openssl telnet ftp vim
+RUN useradd -m appuser
 
 COPY requirements.txt .
 
@@ -13,6 +12,6 @@ COPY . .
 
 EXPOSE 5000
 
-USER root
+USER appuser
 
 CMD ["python", "app.py"]

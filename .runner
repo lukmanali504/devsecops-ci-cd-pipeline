@@ -1,0 +1,11 @@
+﻿{
+  "agentId": 2,
+  "agentName": "ip-172-31-44-13",
+  "poolId": 1,
+  "poolName": "Default",
+  "serverUrl": "https://pipelinesghubeus13.actions.githubusercontent.com/xIUwd506gnRRTB6kBe1B5m8cMc8xNB7AfnetRoJp7G3soggjUV/",
+  "gitHubUrl": "https://github.com/lukmanali504/devsecops-ci-cd-pipeline",
+  "workFolder": "_work",
+  "useV2Flow": true,
+  "serverUrlV2": "https://broker.actions.githubusercontent.com/"
+}

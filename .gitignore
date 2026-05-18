@@ -47,7 +47,8 @@ actions-runner/_work/
 actions-runner/.credentials
 actions-runner/.runner
 actions-runner/.env
-
+externals/
+*.tar.gz
 # =========================================================
 # DOWNLOAD FILES
 # =========================================================

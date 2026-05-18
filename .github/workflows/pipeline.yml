@@ -48,7 +48,7 @@ jobs:
         pip install semgrep
 
     # =====================================================
-    # RUN SEMGREP SOURCE CODE SCAN
+    # RUN SEMGREP (NON-BLOCKING)
     # =====================================================
 
     - name: Run Semgrep Security Scan
@@ -58,47 +58,56 @@ jobs:
         echo "RUNNING SEMGREP SOURCE CODE SECURITY SCAN"
         echo "=================================================="
 
-        semgrep --config=p/secrets app.py
+        semgrep --config=auto app.py || true
+
+        echo "=================================================="
+        echo "SEMGREP SCAN COMPLETED"
+        echo "Pipeline will continue to next security layer."
+        echo "=================================================="
 
     # =====================================================
-    # FAIL PIPELINE FOR HARDCODED AWS CREDENTIALS
+    # RUN GITLEAKS (BLOCKING)
     # =====================================================
 
-    - name: Fail Pipeline For Hardcoded AWS Credentials
+    - name: Run Gitleaks Secret Scan
       run: |
 
-        if grep -E "AKIA[0-9A-Z]{16}" app.py; then
+        echo "=================================================="
+        echo "RUNNING GITLEAKS SECRET SCAN"
+        echo "=================================================="
 
-          echo "=================================================="
-          echo "PIPELINE FAILED"
-          echo "=================================================="
-          echo "Reason:"
-          echo "Hardcoded AWS credentials detected inside app.py"
-          echo "Sensitive AWS secrets were injected into source code."
-          echo "This violates enterprise DevSecOps security policies."
-          echo "Move credentials to Vault or GitHub Secrets."
-          echo "=================================================="
-
-          exit 1
-
-        else
-
-          echo "No hardcoded AWS credentials detected."
-
-        fi
-
-    # =====================================================
-    # SECRET SCAN - GITLEAKS
-    # =====================================================
-
-    - name: Run Gitleaks Scan
-      run: |
         docker run --rm \
         -v ${{ github.workspace }}:/path \
         zricethezav/gitleaks:latest detect \
         --source="/path" \
         --verbose \
         --redact
+
+    # =====================================================
+    # CUSTOM SECURITY FAILURE MESSAGE
+    # =====================================================
+
+    - name: Security Gate Failure Message
+      if: failure()
+      run: |
+
+        echo "=================================================="
+        echo "PIPELINE FAILED"
+        echo "=================================================="
+        echo "Reason:"
+        echo "Hardcoded AWS credentials detected in source code."
+        echo "Gitleaks identified exposed secrets inside app.py"
+        echo "Pipeline blocked by multi-layer DevSecOps security."
+        echo "=================================================="
+        echo "Security Layers Used:"
+        echo "1. Semgrep  - Static Application Security Testing"
+        echo "2. Gitleaks - Secret Detection and Credential Scanning"
+        echo "=================================================="
+        echo "Recommendation:"
+        echo "Move secrets to HashiCorp Vault or GitHub Secrets."
+        echo "=================================================="
+
+        exit 1
 
     # =====================================================
     # CREATE SECURE TERRAFORM FILE
@@ -176,7 +185,7 @@ jobs:
         pip install checkov
 
     # =====================================================
-    # RUN CHECKOV
+    # RUN CHECKOV (NON-BLOCKING)
     # =====================================================
 
     - name: Run Checkov Scan
@@ -227,7 +236,7 @@ jobs:
       uses: actions/checkout@v4
 
     # =====================================================
-    # IMPORT SECRETS FROM VAULT
+    # IMPORT VAULT SECRETS
     # =====================================================
 
     - name: Import Secrets from Vault

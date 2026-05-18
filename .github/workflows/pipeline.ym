@@ -131,7 +131,7 @@ jobs:
         echo "=================================================="
 
 # =========================================================
-# BUILD AND IMAGE SECURITY SCAN
+# BUILD IMAGE AND IMAGE SECURITY SCAN
 # =========================================================
 
   build-and-image-scan:
@@ -158,6 +158,7 @@ jobs:
       with:
         url: ${{ secrets.VAULT_ADDR }}
         token: ${{ secrets.VAULT_TOKEN }}
+        tlsSkipVerify: true
 
         secrets: |
           secret/data/dockerhub username | DOCKER_USERNAME ;
@@ -188,10 +189,6 @@ jobs:
         docker build \
         -t ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest .
 
-        echo "=================================================="
-        echo "DOCKER IMAGE BUILT SUCCESSFULLY"
-        echo "=================================================="
-
     # =====================================================
     # INSTALL TRIVY
     # =====================================================
@@ -200,7 +197,7 @@ jobs:
       run: |
 
         echo "=================================================="
-        echo "INSTALLING TRIVY IMAGE SCANNER"
+        echo "INSTALLING TRIVY"
         echo "=================================================="
 
         sudo apt-get update -y
@@ -220,10 +217,6 @@ jobs:
 
         sudo apt-get install trivy -y
 
-        echo "=================================================="
-        echo "TRIVY INSTALLED SUCCESSFULLY"
-        echo "=================================================="
-
         trivy --version
 
     # =====================================================
@@ -237,18 +230,14 @@ jobs:
         echo "RUNNING TRIVY DOCKER IMAGE SECURITY SCAN"
         echo "=================================================="
 
-        echo "Scanning vulnerable base image and OS packages..."
-
         trivy image \
-        --scanners vuln \
         --severity HIGH,CRITICAL \
-        --ignore-unfixed=false \
         --format table \
         --exit-code 1 \
         ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
 
     # =====================================================
-    # CUSTOM FAILURE MESSAGE
+    # FAILURE MESSAGE
     # =====================================================
 
     - name: Docker Image Vulnerability Failure Message
@@ -269,10 +258,6 @@ jobs:
         echo "Security Layer:"
         echo "Trivy Docker Image Vulnerability Scanner"
         echo "=================================================="
-        echo "Recommendation:"
-        echo "Use secure and updated base images."
-        echo "Remove vulnerable packages immediately."
-        echo "=================================================="
 
         exit 1
 
@@ -282,10 +267,6 @@ jobs:
 
     - name: Push Docker Image
       run: |
-
-        echo "=================================================="
-        echo "PUSHING IMAGE TO DOCKER HUB"
-        echo "=================================================="
 
         docker push \
         ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
@@ -307,6 +288,7 @@ jobs:
       with:
         url: ${{ secrets.VAULT_ADDR }}
         token: ${{ secrets.VAULT_TOKEN }}
+        tlsSkipVerify: true
 
         secrets: |
           secret/data/dockerhub repo | DOCKER_REPOSITORY
@@ -345,6 +327,7 @@ jobs:
       with:
         url: ${{ secrets.VAULT_ADDR }}
         token: ${{ secrets.VAULT_TOKEN }}
+        tlsSkipVerify: true
 
         secrets: |
           secret/data/dockerhub repo | DOCKER_REPOSITORY
@@ -383,6 +366,7 @@ jobs:
       with:
         url: ${{ secrets.VAULT_ADDR }}
         token: ${{ secrets.VAULT_TOKEN }}
+        tlsSkipVerify: true
 
         secrets: |
           secret/data/dockerhub repo | DOCKER_REPOSITORY

@@ -3,6 +3,17 @@ provider "aws" {
 }
 
 # =========================================================
+# KMS KEY
+# =========================================================
+
+resource "aws_kms_key" "s3_kms" {
+  description             = "KMS key for S3 bucket encryption"
+  deletion_window_in_days = 7
+
+  enable_key_rotation = true
+}
+
+# =========================================================
 # MAIN SECURE BUCKET
 # =========================================================
 
@@ -28,18 +39,7 @@ resource "aws_s3_bucket" "log_bucket" {
 }
 
 # =========================================================
-# ENABLE ACCESS LOGGING
-# =========================================================
-
-resource "aws_s3_bucket_logging" "logging" {
-  bucket = aws_s3_bucket.secure_bucket.id
-
-  target_bucket = aws_s3_bucket.log_bucket.id
-  target_prefix = "log/"
-}
-
-# =========================================================
-# VERSIONING ENABLED
+# VERSIONING - MAIN BUCKET
 # =========================================================
 
 resource "aws_s3_bucket_versioning" "versioning" {
@@ -51,13 +51,20 @@ resource "aws_s3_bucket_versioning" "versioning" {
 }
 
 # =========================================================
-# KMS ENCRYPTION
+# VERSIONING - LOG BUCKET
 # =========================================================
 
-resource "aws_kms_key" "s3_kms" {
-  description             = "KMS key for S3 bucket encryption"
-  deletion_window_in_days = 7
+resource "aws_s3_bucket_versioning" "log_bucket_versioning" {
+  bucket = aws_s3_bucket.log_bucket.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
 }
+
+# =========================================================
+# KMS ENCRYPTION - MAIN BUCKET
+# =========================================================
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
   bucket = aws_s3_bucket.secure_bucket.id
@@ -71,7 +78,22 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
 }
 
 # =========================================================
-# BLOCK PUBLIC ACCESS
+# KMS ENCRYPTION - LOG BUCKET
+# =========================================================
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "log_bucket_encryption" {
+  bucket = aws_s3_bucket.log_bucket.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = aws_kms_key.s3_kms.arn
+      sse_algorithm     = "aws:kms"
+    }
+  }
+}
+
+# =========================================================
+# PUBLIC ACCESS BLOCK - MAIN BUCKET
 # =========================================================
 
 resource "aws_s3_bucket_public_access_block" "secure_access" {
@@ -84,14 +106,38 @@ resource "aws_s3_bucket_public_access_block" "secure_access" {
 }
 
 # =========================================================
-# LIFECYCLE MANAGEMENT
+# PUBLIC ACCESS BLOCK - LOG BUCKET
+# =========================================================
+
+resource "aws_s3_bucket_public_access_block" "log_secure_access" {
+  bucket = aws_s3_bucket.log_bucket.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# =========================================================
+# ACCESS LOGGING
+# =========================================================
+
+resource "aws_s3_bucket_logging" "logging" {
+  bucket = aws_s3_bucket.secure_bucket.id
+
+  target_bucket = aws_s3_bucket.log_bucket.id
+  target_prefix = "log/"
+}
+
+# =========================================================
+# LIFECYCLE - MAIN BUCKET
 # =========================================================
 
 resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
   bucket = aws_s3_bucket.secure_bucket.id
 
   rule {
-    id     = "log"
+    id     = "main-lifecycle"
     status = "Enabled"
 
     expiration {
@@ -105,49 +151,22 @@ resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
 }
 
 # =========================================================
-# CROSS REGION REPLICATION PLACEHOLDER
+# LIFECYCLE - LOG BUCKET
 # =========================================================
 
-resource "aws_s3_bucket_replication_configuration" "replication" {
-  depends_on = [aws_s3_bucket_versioning.versioning]
-
-  role   = "arn:aws:iam::123456789012:role/s3-replication-role"
-  bucket = aws_s3_bucket.secure_bucket.id
+resource "aws_s3_bucket_lifecycle_configuration" "log_lifecycle" {
+  bucket = aws_s3_bucket.log_bucket.id
 
   rule {
-    id     = "ReplicationRule"
+    id     = "log-lifecycle"
     status = "Enabled"
 
-    destination {
-      bucket        = "arn:aws:s3:::enterprise-devsecops-backup-bucket"
-      storage_class = "STANDARD"
+    expiration {
+      days = 90
     }
-  }
-}
 
-# =========================================================
-# LOG BUCKET VERSIONING
-# =========================================================
-
-resource "aws_s3_bucket_versioning" "log_bucket_versioning" {
-  bucket = aws_s3_bucket.log_bucket.id
-
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-# =========================================================
-# LOG BUCKET KMS ENCRYPTION
-# =========================================================
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "log_bucket_encryption" {
-  bucket = aws_s3_bucket.log_bucket.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      kms_master_key_id = aws_kms_key.s3_kms.arn
-      sse_algorithm     = "aws:kms"
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
     }
   }
 }

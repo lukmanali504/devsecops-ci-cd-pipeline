@@ -62,7 +62,7 @@ jobs:
 
         echo "=================================================="
         echo "SEMGREP SCAN COMPLETED"
-        echo "Pipeline will continue to next security layer."
+        echo "Pipeline moving to next security layer."
         echo "=================================================="
 
     # =====================================================
@@ -81,13 +81,14 @@ jobs:
         zricethezav/gitleaks:latest detect \
         --source="/path" \
         --verbose \
-        --redact
+        --redact \
+        --exit-code 1
 
     # =====================================================
-    # CUSTOM SECURITY FAILURE MESSAGE
+    # CUSTOM FAILURE MESSAGE
     # =====================================================
 
-    - name: Security Gate Failure Message
+    - name: Security Failure Message
       if: failure()
       run: |
 
@@ -95,22 +96,24 @@ jobs:
         echo "PIPELINE FAILED"
         echo "=================================================="
         echo "Reason:"
-        echo "Hardcoded AWS credentials detected in source code."
-        echo "Gitleaks identified exposed secrets inside app.py"
-        echo "Pipeline blocked by multi-layer DevSecOps security."
+        echo "Gitleaks detected hardcoded AWS credentials"
+        echo "inside app.py source code."
         echo "=================================================="
-        echo "Security Layers Used:"
-        echo "1. Semgrep  - Static Application Security Testing"
-        echo "2. Gitleaks - Secret Detection and Credential Scanning"
+        echo "Security Enforcement:"
+        echo "1. Semgrep  - SAST Source Code Scan"
+        echo "2. Gitleaks - Secret Detection"
+        echo "=================================================="
+        echo "Hardcoded secrets violate enterprise"
+        echo "DevSecOps security policies."
         echo "=================================================="
         echo "Recommendation:"
-        echo "Move secrets to HashiCorp Vault or GitHub Secrets."
+        echo "Use HashiCorp Vault or GitHub Secrets."
         echo "=================================================="
 
         exit 1
 
     # =====================================================
-    # CREATE SECURE TERRAFORM FILE
+    # CREATE TERRAFORM FILE
     # =====================================================
 
     - name: Create Secure Terraform File
@@ -138,42 +141,6 @@ jobs:
           ignore_public_acls      = true
           restrict_public_buckets = true
         }
-
-        resource "aws_s3_bucket_versioning" "versioning" {
-          bucket = aws_s3_bucket.secure_bucket.id
-
-          versioning_configuration {
-            status = "Enabled"
-          }
-        }
-
-        resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
-          bucket = aws_s3_bucket.secure_bucket.id
-
-          rule {
-            apply_server_side_encryption_by_default {
-              sse_algorithm = "AES256"
-            }
-          }
-        }
-
-        resource "aws_s3_bucket_lifecycle_configuration" "lifecycle" {
-          bucket = aws_s3_bucket.secure_bucket.id
-
-          rule {
-            id     = "log"
-            status = "Enabled"
-
-            expiration {
-              days = 90
-            }
-          }
-        }
-
-        resource "aws_s3_bucket_acl" "bucket_acl" {
-          bucket = aws_s3_bucket.secure_bucket.id
-          acl    = "private"
-        }
         EOF
 
     # =====================================================
@@ -185,7 +152,7 @@ jobs:
         pip install checkov
 
     # =====================================================
-    # RUN CHECKOV (NON-BLOCKING)
+    # RUN CHECKOV
     # =====================================================
 
     - name: Run Checkov Scan
@@ -214,7 +181,7 @@ jobs:
         sudo apt-get install trivy -y
 
     # =====================================================
-    # RUN TRIVY FILE SYSTEM SCAN
+    # RUN TRIVY SCAN
     # =====================================================
 
     - name: Run Dependency Scan
@@ -276,3 +243,99 @@ jobs:
     - name: Push Docker Image
       run: |
         docker push ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+# =========================================================
+# DEPLOY DEVELOPMENT ENVIRONMENT
+# =========================================================
+
+  deploy-development:
+    name: Deploy Development Environment
+    runs-on: self-hosted
+    needs: build-and-push
+
+    steps:
+
+    - name: Import Vault Secret
+      id: vault
+      uses: hashicorp/vault-action@v2
+      with:
+        url: ${{ secrets.VAULT_ADDR }}
+        token: ${{ secrets.VAULT_TOKEN }}
+
+        secrets: |
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
+
+    - name: Deploy Dev Container
+      run: |
+
+        docker rm -f dev-container || true
+
+        docker run -d \
+        --name dev-container \
+        -p 5001:5000 \
+        -e ENVIRONMENT=DEVELOPMENT \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+# =========================================================
+# DEPLOY STAGING ENVIRONMENT
+# =========================================================
+
+  deploy-staging:
+    name: Deploy Staging Environment
+    runs-on: self-hosted
+    needs: deploy-development
+
+    steps:
+
+    - name: Import Vault Secret
+      id: vault
+      uses: hashicorp/vault-action@v2
+      with:
+        url: ${{ secrets.VAULT_ADDR }}
+        token: ${{ secrets.VAULT_TOKEN }}
+
+        secrets: |
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
+
+    - name: Deploy Staging Container
+      run: |
+
+        docker rm -f staging-container || true
+
+        docker run -d \
+        --name staging-container \
+        -p 5002:5000 \
+        -e ENVIRONMENT=STAGING \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+# =========================================================
+# DEPLOY PRODUCTION ENVIRONMENT
+# =========================================================
+
+  deploy-production:
+    name: Deploy Production Environment
+    runs-on: self-hosted
+    needs: deploy-staging
+
+    steps:
+
+    - name: Import Vault Secret
+      id: vault
+      uses: hashicorp/vault-action@v2
+      with:
+        url: ${{ secrets.VAULT_ADDR }}
+        token: ${{ secrets.VAULT_TOKEN }}
+
+        secrets: |
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
+
+    - name: Deploy Production Container
+      run: |
+
+        docker rm -f prod-container || true
+
+        docker run -d \
+        --name prod-container \
+        -p 5003:5000 \
+        -e ENVIRONMENT=PRODUCTION \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest

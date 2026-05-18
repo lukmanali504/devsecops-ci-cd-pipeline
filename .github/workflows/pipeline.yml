@@ -43,7 +43,7 @@ jobs:
     # INSTALL DEPENDENCIES
     # =====================================================
 
-    - name: Install Dependencies
+    - name: Install Python Dependencies
       run: |
         pip install -r requirements.txt
 
@@ -56,20 +56,20 @@ jobs:
         pip install semgrep
 
     # =====================================================
-    # RUN SEMGREP
+    # RUN SEMGREP SOURCE CODE SCAN
     # =====================================================
 
-    - name: Run Semgrep Scan
+    - name: Run Semgrep Security Scan
       run: |
 
         echo "=================================================="
-        echo "RUNNING SEMGREP SECURITY SCAN"
+        echo "RUNNING SEMGREP SOURCE CODE SECURITY SCAN"
         echo "=================================================="
 
         semgrep --config=auto . || true
 
         echo "=================================================="
-        echo "SEMGREP SCAN COMPLETED"
+        echo "SEMGREP SECURITY SCAN COMPLETED"
         echo "=================================================="
 
     # =====================================================
@@ -86,10 +86,10 @@ jobs:
         sudo mv gitleaks /usr/local/bin/
 
     # =====================================================
-    # RUN GITLEAKS
+    # RUN GITLEAKS SECRET SCAN
     # =====================================================
 
-    - name: Run Gitleaks Scan
+    - name: Run Gitleaks Secret Scan
       run: |
 
         echo "=================================================="
@@ -100,6 +100,10 @@ jobs:
         --source . \
         --verbose \
         --redact || true
+
+        echo "=================================================="
+        echo "GITLEAKS SECRET SCAN COMPLETED"
+        echo "=================================================="
 
     # =====================================================
     # CREATE TERRAFORM FILE
@@ -122,6 +126,15 @@ jobs:
             Name = "SecureBucket"
           }
         }
+
+        resource "aws_s3_bucket_public_access_block" "secure_access" {
+          bucket = aws_s3_bucket.secure_bucket.id
+
+          block_public_acls       = true
+          block_public_policy     = true
+          ignore_public_acls      = true
+          restrict_public_buckets = true
+        }
         EOF
 
     # =====================================================
@@ -133,12 +146,21 @@ jobs:
         pip install checkov
 
     # =====================================================
-    # RUN CHECKOV
+    # RUN CHECKOV SCAN
     # =====================================================
 
     - name: Run Checkov Scan
       run: |
+
+        echo "=================================================="
+        echo "RUNNING CHECKOV IaC SECURITY SCAN"
+        echo "=================================================="
+
         checkov -d . --soft-fail
+
+        echo "=================================================="
+        echo "CHECKOV SECURITY SCAN COMPLETED"
+        echo "=================================================="
 
     # =====================================================
     # INSTALL TRIVY
@@ -147,7 +169,11 @@ jobs:
     - name: Install Trivy
       run: |
 
-        sudo apt-get update
+        echo "=================================================="
+        echo "INSTALLING TRIVY VULNERABILITY SCANNER"
+        echo "=================================================="
+
+        sudo apt-get update -y
 
         sudo apt-get install wget apt-transport-https gnupg lsb-release -y
 
@@ -160,9 +186,15 @@ jobs:
         $(lsb_release -sc) main" | \
         sudo tee /etc/apt/sources.list.d/trivy.list
 
-        sudo apt-get update
+        sudo apt-get update -y
 
         sudo apt-get install trivy -y
+
+        echo "=================================================="
+        echo "TRIVY INSTALLED SUCCESSFULLY"
+        echo "=================================================="
+
+        trivy --version
 
     # =====================================================
     # RUN TRIVY DEPENDENCY SCAN
@@ -172,18 +204,22 @@ jobs:
       run: |
 
         echo "=================================================="
-        echo "RUNNING TRIVY DEPENDENCY SCAN"
+        echo "RUNNING TRIVY DEPENDENCY VULNERABILITY SCAN"
         echo "=================================================="
 
+        echo "Scanning vulnerable dependencies from requirements.txt"
+
         trivy fs . \
+        --scanners vuln \
         --severity HIGH,CRITICAL \
+        --format table \
         --exit-code 1
 
     # =====================================================
     # CUSTOM FAILURE MESSAGE
     # =====================================================
 
-    - name: Dependency Security Failure Message
+    - name: Dependency Vulnerability Failure Message
       if: failure()
       run: |
 
@@ -191,11 +227,18 @@ jobs:
         echo "PIPELINE FAILED"
         echo "=================================================="
         echo "Reason:"
-        echo "Vulnerable dependencies detected inside application."
-        echo "Third-party libraries contain HIGH or CRITICAL CVEs."
+        echo "Trivy detected vulnerable dependencies"
+        echo "inside application source code."
+        echo "=================================================="
+        echo "Affected Component:"
+        echo "Third-party Python libraries"
+        echo "from requirements.txt"
         echo "=================================================="
         echo "Security Layer:"
         echo "Trivy Dependency Vulnerability Scanner"
+        echo "=================================================="
+        echo "Detected Severity:"
+        echo "HIGH / CRITICAL CVEs"
         echo "=================================================="
         echo "Recommendation:"
         echo "Upgrade vulnerable dependencies immediately."
@@ -244,7 +287,7 @@ jobs:
         password: ${{ steps.vault.outputs.DOCKER_PASSWORD }}
 
     # =====================================================
-    # BUILD IMAGE
+    # BUILD DOCKER IMAGE
     # =====================================================
 
     - name: Build Docker Image
@@ -253,10 +296,106 @@ jobs:
         docker build -t ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest .
 
     # =====================================================
-    # PUSH IMAGE
+    # PUSH DOCKER IMAGE
     # =====================================================
 
     - name: Push Docker Image
       run: |
 
         docker push ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+# =========================================================
+# DEPLOY DEVELOPMENT ENVIRONMENT
+# =========================================================
+
+  deploy-development:
+    name: Deploy Development Environment
+    runs-on: self-hosted
+    needs: build-and-push
+
+    steps:
+
+    - name: Import Vault Secret
+      id: vault
+      uses: hashicorp/vault-action@v2
+      with:
+        url: ${{ secrets.VAULT_ADDR }}
+        token: ${{ secrets.VAULT_TOKEN }}
+
+        secrets: |
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
+
+    - name: Deploy Development Container
+      run: |
+
+        docker rm -f dev-container || true
+
+        docker run -d \
+        --name dev-container \
+        -p 5001:5000 \
+        -e ENVIRONMENT=DEVELOPMENT \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+# =========================================================
+# DEPLOY STAGING ENVIRONMENT
+# =========================================================
+
+  deploy-staging:
+    name: Deploy Staging Environment
+    runs-on: self-hosted
+    needs: deploy-development
+
+    steps:
+
+    - name: Import Vault Secret
+      id: vault
+      uses: hashicorp/vault-action@v2
+      with:
+        url: ${{ secrets.VAULT_ADDR }}
+        token: ${{ secrets.VAULT_TOKEN }}
+
+        secrets: |
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
+
+    - name: Deploy Staging Container
+      run: |
+
+        docker rm -f staging-container || true
+
+        docker run -d \
+        --name staging-container \
+        -p 5002:5000 \
+        -e ENVIRONMENT=STAGING \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+# =========================================================
+# DEPLOY PRODUCTION ENVIRONMENT
+# =========================================================
+
+  deploy-production:
+    name: Deploy Production Environment
+    runs-on: self-hosted
+    needs: deploy-staging
+
+    steps:
+
+    - name: Import Vault Secret
+      id: vault
+      uses: hashicorp/vault-action@v2
+      with:
+        url: ${{ secrets.VAULT_ADDR }}
+        token: ${{ secrets.VAULT_TOKEN }}
+
+        secrets: |
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
+
+    - name: Deploy Production Container
+      run: |
+
+        docker rm -f prod-container || true
+
+        docker run -d \
+        --name prod-container \
+        -p 5003:5000 \
+        -e ENVIRONMENT=PRODUCTION \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest

@@ -40,6 +40,14 @@ jobs:
         python-version: "3.11"
 
     # =====================================================
+    # INSTALL DEPENDENCIES
+    # =====================================================
+
+    - name: Install Dependencies
+      run: |
+        pip install -r requirements.txt
+
+    # =====================================================
     # INSTALL SEMGREP
     # =====================================================
 
@@ -48,17 +56,17 @@ jobs:
         pip install semgrep
 
     # =====================================================
-    # RUN SEMGREP (NON BLOCKING)
+    # RUN SEMGREP
     # =====================================================
 
-    - name: Run Semgrep Security Scan
+    - name: Run Semgrep Scan
       run: |
 
         echo "=================================================="
-        echo "RUNNING SEMGREP SOURCE CODE SCAN"
+        echo "RUNNING SEMGREP SECURITY SCAN"
         echo "=================================================="
 
-        semgrep --config=auto app.py || true
+        semgrep --config=auto . || true
 
         echo "=================================================="
         echo "SEMGREP SCAN COMPLETED"
@@ -78,10 +86,10 @@ jobs:
         sudo mv gitleaks /usr/local/bin/
 
     # =====================================================
-    # RUN GITLEAKS (BLOCKING)
+    # RUN GITLEAKS
     # =====================================================
 
-    - name: Run Gitleaks Secret Scan
+    - name: Run Gitleaks Scan
       run: |
 
         echo "=================================================="
@@ -91,36 +99,7 @@ jobs:
         gitleaks detect \
         --source . \
         --verbose \
-        --redact \
-        --exit-code 1
-
-    # =====================================================
-    # CUSTOM FAILURE MESSAGE
-    # =====================================================
-
-    - name: Security Failure Message
-      if: failure()
-      run: |
-
-        echo "=================================================="
-        echo "PIPELINE FAILED"
-        echo "=================================================="
-        echo "Reason:"
-        echo "Gitleaks detected hardcoded AWS credentials"
-        echo "inside application source code."
-        echo "=================================================="
-        echo "Security Enforcement Layers:"
-        echo "1. Semgrep  - Static Application Security Testing"
-        echo "2. Gitleaks - Secret Detection"
-        echo "=================================================="
-        echo "Hardcoded credentials violate enterprise"
-        echo "DevSecOps security policies."
-        echo "=================================================="
-        echo "Recommendation:"
-        echo "Use HashiCorp Vault or GitHub Secrets."
-        echo "=================================================="
-
-        exit 1
+        --redact || true
 
     # =====================================================
     # CREATE TERRAFORM FILE
@@ -143,15 +122,6 @@ jobs:
             Name = "SecureBucket"
           }
         }
-
-        resource "aws_s3_bucket_public_access_block" "secure_access" {
-          bucket = aws_s3_bucket.secure_bucket.id
-
-          block_public_acls       = true
-          block_public_policy     = true
-          ignore_public_acls      = true
-          restrict_public_buckets = true
-        }
         EOF
 
     # =====================================================
@@ -163,7 +133,7 @@ jobs:
         pip install checkov
 
     # =====================================================
-    # RUN CHECKOV (NON BLOCKING)
+    # RUN CHECKOV
     # =====================================================
 
     - name: Run Checkov Scan
@@ -195,13 +165,43 @@ jobs:
         sudo apt-get install trivy -y
 
     # =====================================================
-    # RUN TRIVY FILE SYSTEM SCAN
+    # RUN TRIVY DEPENDENCY SCAN
     # =====================================================
 
-    - name: Run Dependency Scan
+    - name: Run Trivy Dependency Scan
       run: |
 
-        trivy fs . --severity HIGH,CRITICAL
+        echo "=================================================="
+        echo "RUNNING TRIVY DEPENDENCY SCAN"
+        echo "=================================================="
+
+        trivy fs . \
+        --severity HIGH,CRITICAL \
+        --exit-code 1
+
+    # =====================================================
+    # CUSTOM FAILURE MESSAGE
+    # =====================================================
+
+    - name: Dependency Security Failure Message
+      if: failure()
+      run: |
+
+        echo "=================================================="
+        echo "PIPELINE FAILED"
+        echo "=================================================="
+        echo "Reason:"
+        echo "Vulnerable dependencies detected inside application."
+        echo "Third-party libraries contain HIGH or CRITICAL CVEs."
+        echo "=================================================="
+        echo "Security Layer:"
+        echo "Trivy Dependency Vulnerability Scanner"
+        echo "=================================================="
+        echo "Recommendation:"
+        echo "Upgrade vulnerable dependencies immediately."
+        echo "=================================================="
+
+        exit 1
 
 # =========================================================
 # BUILD AND PUSH IMAGE
@@ -260,99 +260,3 @@ jobs:
       run: |
 
         docker push ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
-
-# =========================================================
-# DEPLOY DEVELOPMENT ENVIRONMENT
-# =========================================================
-
-  deploy-development:
-    name: Deploy Development Environment
-    runs-on: self-hosted
-    needs: build-and-push
-
-    steps:
-
-    - name: Import Vault Secret
-      id: vault
-      uses: hashicorp/vault-action@v2
-      with:
-        url: ${{ secrets.VAULT_ADDR }}
-        token: ${{ secrets.VAULT_TOKEN }}
-
-        secrets: |
-          secret/data/dockerhub repo | DOCKER_REPOSITORY
-
-    - name: Deploy Development Container
-      run: |
-
-        docker rm -f dev-container || true
-
-        docker run -d \
-        --name dev-container \
-        -p 5001:5000 \
-        -e ENVIRONMENT=DEVELOPMENT \
-        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
-
-# =========================================================
-# DEPLOY STAGING ENVIRONMENT
-# =========================================================
-
-  deploy-staging:
-    name: Deploy Staging Environment
-    runs-on: self-hosted
-    needs: deploy-development
-
-    steps:
-
-    - name: Import Vault Secret
-      id: vault
-      uses: hashicorp/vault-action@v2
-      with:
-        url: ${{ secrets.VAULT_ADDR }}
-        token: ${{ secrets.VAULT_TOKEN }}
-
-        secrets: |
-          secret/data/dockerhub repo | DOCKER_REPOSITORY
-
-    - name: Deploy Staging Container
-      run: |
-
-        docker rm -f staging-container || true
-
-        docker run -d \
-        --name staging-container \
-        -p 5002:5000 \
-        -e ENVIRONMENT=STAGING \
-        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
-
-# =========================================================
-# DEPLOY PRODUCTION ENVIRONMENT
-# =========================================================
-
-  deploy-production:
-    name: Deploy Production Environment
-    runs-on: self-hosted
-    needs: deploy-staging
-
-    steps:
-
-    - name: Import Vault Secret
-      id: vault
-      uses: hashicorp/vault-action@v2
-      with:
-        url: ${{ secrets.VAULT_ADDR }}
-        token: ${{ secrets.VAULT_TOKEN }}
-
-        secrets: |
-          secret/data/dockerhub repo | DOCKER_REPOSITORY
-
-    - name: Deploy Production Container
-      run: |
-
-        docker rm -f prod-container || true
-
-        docker run -d \
-        --name prod-container \
-        -p 5003:5000 \
-        -e ENVIRONMENT=PRODUCTION \
-        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest

@@ -1,11 +1,16 @@
 from flask import Flask
+import requests
+import yaml
 
 app = Flask(__name__)
 
-
-@app.route('/')
+@app.route("/")
 def home():
-    return "Enterprise DevSecOps Pipeline Running Successfully"
+    return "Enterprise DevSecOps Pipeline Running"
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+@app.route("/health")
+def health():
+    return {"status": "running"}
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)

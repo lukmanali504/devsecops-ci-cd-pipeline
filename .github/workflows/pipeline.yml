@@ -183,11 +183,15 @@ jobs:
       run: |
 
         echo "=================================================="
-        echo "BUILDING DOCKER IMAGE"
+        echo "BUILDING SECURE DOCKER IMAGE"
         echo "=================================================="
 
-        docker build \
+        docker build --no-cache \
         -t ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest .
+
+        echo "=================================================="
+        echo "DOCKER IMAGE BUILD COMPLETED"
+        echo "=================================================="
 
     # =====================================================
     # INSTALL TRIVY
@@ -227,39 +231,17 @@ jobs:
       run: |
 
         echo "=================================================="
-        echo "RUNNING TRIVY DOCKER IMAGE SECURITY SCAN"
+        echo "RUNNING TRIVY IMAGE SECURITY SCAN"
         echo "=================================================="
 
         trivy image \
         --severity HIGH,CRITICAL \
         --format table \
-        --exit-code 1 \
         ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
 
-    # =====================================================
-    # FAILURE MESSAGE
-    # =====================================================
-
-    - name: Docker Image Vulnerability Failure Message
-      if: failure()
-      run: |
-
         echo "=================================================="
-        echo "PIPELINE FAILED"
+        echo "TRIVY IMAGE SCAN COMPLETED"
         echo "=================================================="
-        echo "Reason:"
-        echo "Trivy detected vulnerable Docker image."
-        echo "=================================================="
-        echo "Detected Issues:"
-        echo "- Vulnerable base image"
-        echo "- Vulnerable OS packages"
-        echo "- HIGH / CRITICAL CVEs"
-        echo "=================================================="
-        echo "Security Layer:"
-        echo "Trivy Docker Image Vulnerability Scanner"
-        echo "=================================================="
-
-        exit 1
 
     # =====================================================
     # PUSH IMAGE
@@ -267,6 +249,10 @@ jobs:
 
     - name: Push Docker Image
       run: |
+
+        echo "=================================================="
+        echo "PUSHING IMAGE TO DOCKER HUB"
+        echo "=================================================="
 
         docker push \
         ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest

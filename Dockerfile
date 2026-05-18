@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN useradd -m appuser
+RUN adduser --disabled-password appuser
 
 COPY requirements.txt .
 

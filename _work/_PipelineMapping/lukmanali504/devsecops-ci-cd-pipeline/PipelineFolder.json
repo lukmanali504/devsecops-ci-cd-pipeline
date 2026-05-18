@@ -1,0 +1,12 @@
+﻿{
+  "repositoryName": "lukmanali504/devsecops-ci-cd-pipeline",
+  "pipelineDirectory": "devsecops-ci-cd-pipeline",
+  "workspaceDirectory": "devsecops-ci-cd-pipeline/devsecops-ci-cd-pipeline",
+  "repositories": {
+    "lukmanali504/devsecops-ci-cd-pipeline": {
+      "repositoryPath": "devsecops-ci-cd-pipeline/devsecops-ci-cd-pipeline",
+      "lastRunOn": "05/18/2026 09:27:59 +00:00"
+    }
+  },
+  "lastRunOn": "05/18/2026 09:28:34 +00:00"
+}

@@ -24,7 +24,7 @@ jobs:
     steps:
 
     # =====================================================
-    # CHECKOUT SOURCE CODE
+    # CHECKOUT REPOSITORY
     # =====================================================
 
     - name: Checkout Repository
@@ -63,7 +63,7 @@ jobs:
       run: |
 
         echo "=================================================="
-        echo "RUNNING SEMGREP SOURCE CODE SCAN"
+        echo "RUNNING SEMGREP SOURCE CODE SECURITY SCAN"
         echo "=================================================="
 
         semgrep --config=auto . || true
@@ -117,18 +117,44 @@ jobs:
     # RUN CHECKOV
     # =====================================================
 
-    - name: Run Checkov Scan
+    - name: Run Checkov IaC Security Scan
       run: |
 
         echo "=================================================="
         echo "RUNNING CHECKOV IaC SECURITY SCAN"
         echo "=================================================="
 
-        checkov -d . --soft-fail
+        checkov -d terraform \
+        --framework terraform \
+        --soft-fail-on LOW
+
+    # =====================================================
+    # CHECKOV FAILURE MESSAGE
+    # =====================================================
+
+    - name: Public S3 Bucket Failure Message
+      if: failure()
+      run: |
 
         echo "=================================================="
-        echo "CHECKOV SCAN COMPLETED"
+        echo "PIPELINE FAILED"
         echo "=================================================="
+        echo "Reason:"
+        echo "Checkov detected insecure Terraform configuration."
+        echo "=================================================="
+        echo "Detected Issues:"
+        echo "- Publicly accessible S3 bucket"
+        echo "- Public bucket ACL enabled"
+        echo "- Public access block disabled"
+        echo "=================================================="
+        echo "Security Layer:"
+        echo "Checkov Infrastructure as Code Security Scanner"
+        echo "=================================================="
+        echo "Risk:"
+        echo "Sensitive files may become publicly accessible."
+        echo "=================================================="
+
+        exit 1
 
 # =========================================================
 # BUILD IMAGE AND IMAGE SECURITY SCAN
@@ -140,10 +166,6 @@ jobs:
     needs: security-scans
 
     steps:
-
-    # =====================================================
-    # CHECKOUT SOURCE CODE
-    # =====================================================
 
     - name: Checkout Repository
       uses: actions/checkout@v4
@@ -158,7 +180,6 @@ jobs:
       with:
         url: ${{ secrets.VAULT_ADDR }}
         token: ${{ secrets.VAULT_TOKEN }}
-        tlsSkipVerify: true
 
         secrets: |
           secret/data/dockerhub username | DOCKER_USERNAME ;
@@ -176,22 +197,14 @@ jobs:
         password: ${{ steps.vault.outputs.DOCKER_PASSWORD }}
 
     # =====================================================
-    # BUILD DOCKER IMAGE
+    # BUILD IMAGE
     # =====================================================
 
     - name: Build Docker Image
       run: |
 
-        echo "=================================================="
-        echo "BUILDING SECURE DOCKER IMAGE"
-        echo "=================================================="
-
         docker build --no-cache \
         -t ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest .
-
-        echo "=================================================="
-        echo "DOCKER IMAGE BUILD COMPLETED"
-        echo "=================================================="
 
     # =====================================================
     # INSTALL TRIVY
@@ -199,10 +212,6 @@ jobs:
 
     - name: Install Trivy
       run: |
-
-        echo "=================================================="
-        echo "INSTALLING TRIVY"
-        echo "=================================================="
 
         sudo apt-get update -y
 
@@ -220,8 +229,6 @@ jobs:
         sudo apt-get update -y
 
         sudo apt-get install trivy -y
-
-        trivy --version
 
     # =====================================================
     # RUN TRIVY IMAGE SCAN
@@ -250,126 +257,5 @@ jobs:
     - name: Push Docker Image
       run: |
 
-        echo "=================================================="
-        echo "PUSHING IMAGE TO DOCKER HUB"
-        echo "=================================================="
-
         docker push \
-        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
-
-# =========================================================
-# DEPLOY DEVELOPMENT ENVIRONMENT
-# =========================================================
-
-  deploy-development:
-    name: Deploy Development Environment
-    runs-on: self-hosted
-    needs: build-and-image-scan
-
-    steps:
-
-    - name: Import Vault Secret
-      id: vault
-      uses: hashicorp/vault-action@v2
-      with:
-        url: ${{ secrets.VAULT_ADDR }}
-        token: ${{ secrets.VAULT_TOKEN }}
-        tlsSkipVerify: true
-
-        secrets: |
-          secret/data/dockerhub repo | DOCKER_REPOSITORY
-
-    - name: Pull Docker Image
-      run: |
-
-        docker pull \
-        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
-
-    - name: Run Development Container
-      run: |
-
-        docker rm -f dev-container || true
-
-        docker run -d \
-        --name dev-container \
-        -p 5001:5000 \
-        -e ENVIRONMENT=DEVELOPMENT \
-        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
-
-# =========================================================
-# DEPLOY STAGING ENVIRONMENT
-# =========================================================
-
-  deploy-staging:
-    name: Deploy Staging Environment
-    runs-on: self-hosted
-    needs: deploy-development
-
-    steps:
-
-    - name: Import Vault Secret
-      id: vault
-      uses: hashicorp/vault-action@v2
-      with:
-        url: ${{ secrets.VAULT_ADDR }}
-        token: ${{ secrets.VAULT_TOKEN }}
-        tlsSkipVerify: true
-
-        secrets: |
-          secret/data/dockerhub repo | DOCKER_REPOSITORY
-
-    - name: Pull Docker Image
-      run: |
-
-        docker pull \
-        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
-
-    - name: Run Staging Container
-      run: |
-
-        docker rm -f staging-container || true
-
-        docker run -d \
-        --name staging-container \
-        -p 5002:5000 \
-        -e ENVIRONMENT=STAGING \
-        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
-
-# =========================================================
-# DEPLOY PRODUCTION ENVIRONMENT
-# =========================================================
-
-  deploy-production:
-    name: Deploy Production Environment
-    runs-on: self-hosted
-    needs: deploy-staging
-
-    steps:
-
-    - name: Import Vault Secret
-      id: vault
-      uses: hashicorp/vault-action@v2
-      with:
-        url: ${{ secrets.VAULT_ADDR }}
-        token: ${{ secrets.VAULT_TOKEN }}
-        tlsSkipVerify: true
-
-        secrets: |
-          secret/data/dockerhub repo | DOCKER_REPOSITORY
-
-    - name: Pull Docker Image
-      run: |
-
-        docker pull \
-        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
-
-    - name: Run Production Container
-      run: |
-
-        docker rm -f prod-container || true
-
-        docker run -d \
-        --name prod-container \
-        -p 5003:5000 \
-        -e ENVIRONMENT=PRODUCTION \
         ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest

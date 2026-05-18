@@ -121,7 +121,7 @@ jobs:
       run: |
 
         echo "=================================================="
-        echo "RUNNING CHECKOV IaC SCAN"
+        echo "RUNNING CHECKOV IaC SECURITY SCAN"
         echo "=================================================="
 
         checkov -d . --soft-fail
@@ -131,11 +131,11 @@ jobs:
         echo "=================================================="
 
 # =========================================================
-# BUILD AND PUSH IMAGE
+# BUILD AND IMAGE SECURITY SCAN
 # =========================================================
 
-  build-and-push:
-    name: Build and Push Docker Image
+  build-and-image-scan:
+    name: Build Docker Image And Scan
     runs-on: ubuntu-latest
     needs: security-scans
 
@@ -175,7 +175,7 @@ jobs:
         password: ${{ steps.vault.outputs.DOCKER_PASSWORD }}
 
     # =====================================================
-    # BUILD IMAGE
+    # BUILD DOCKER IMAGE
     # =====================================================
 
     - name: Build Docker Image
@@ -185,7 +185,12 @@ jobs:
         echo "BUILDING DOCKER IMAGE"
         echo "=================================================="
 
-        docker build -t ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest .
+        docker build \
+        -t ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest .
+
+        echo "=================================================="
+        echo "DOCKER IMAGE BUILT SUCCESSFULLY"
+        echo "=================================================="
 
     # =====================================================
     # INSTALL TRIVY
@@ -195,7 +200,7 @@ jobs:
       run: |
 
         echo "=================================================="
-        echo "INSTALLING TRIVY"
+        echo "INSTALLING TRIVY IMAGE SCANNER"
         echo "=================================================="
 
         sudo apt-get update -y
@@ -215,23 +220,61 @@ jobs:
 
         sudo apt-get install trivy -y
 
+        echo "=================================================="
+        echo "TRIVY INSTALLED SUCCESSFULLY"
+        echo "=================================================="
+
         trivy --version
 
     # =====================================================
-    # IMAGE SCANNING
+    # RUN TRIVY IMAGE SCAN
     # =====================================================
 
-    - name: Run Trivy Image Scan
+    - name: Run Trivy Docker Image Scan
       run: |
 
         echo "=================================================="
-        echo "RUNNING TRIVY IMAGE SCAN"
+        echo "RUNNING TRIVY DOCKER IMAGE SECURITY SCAN"
         echo "=================================================="
 
+        echo "Scanning vulnerable base image and OS packages..."
+
         trivy image \
+        --scanners vuln \
         --severity HIGH,CRITICAL \
+        --ignore-unfixed=false \
         --format table \
+        --exit-code 1 \
         ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+    # =====================================================
+    # CUSTOM FAILURE MESSAGE
+    # =====================================================
+
+    - name: Docker Image Vulnerability Failure Message
+      if: failure()
+      run: |
+
+        echo "=================================================="
+        echo "PIPELINE FAILED"
+        echo "=================================================="
+        echo "Reason:"
+        echo "Trivy detected vulnerable Docker image."
+        echo "=================================================="
+        echo "Detected Issues:"
+        echo "- Vulnerable base image"
+        echo "- Vulnerable OS packages"
+        echo "- HIGH / CRITICAL CVEs"
+        echo "=================================================="
+        echo "Security Layer:"
+        echo "Trivy Docker Image Vulnerability Scanner"
+        echo "=================================================="
+        echo "Recommendation:"
+        echo "Use secure and updated base images."
+        echo "Remove vulnerable packages immediately."
+        echo "=================================================="
+
+        exit 1
 
     # =====================================================
     # PUSH IMAGE
@@ -244,7 +287,8 @@ jobs:
         echo "PUSHING IMAGE TO DOCKER HUB"
         echo "=================================================="
 
-        docker push ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+        docker push \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
 
 # =========================================================
 # DEPLOY DEVELOPMENT ENVIRONMENT
@@ -253,7 +297,7 @@ jobs:
   deploy-development:
     name: Deploy Development Environment
     runs-on: self-hosted
-    needs: build-and-push
+    needs: build-and-image-scan
 
     steps:
 

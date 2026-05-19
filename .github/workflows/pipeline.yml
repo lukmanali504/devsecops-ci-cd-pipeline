@@ -108,25 +108,26 @@ jobs:
     # =====================================================
 
     - name: Run Gitleaks Scan
-      run: |
+  run: |
 
-        echo "=================================================="
-        echo "RUNNING GITLEAKS SCAN"
-        echo "=================================================="
+    echo "=================================================="
+    echo "RUNNING GITLEAKS SCAN"
+    echo "=================================================="
 
-        rm -f reports/gitleaks-report.json
+    rm -f reports/gitleaks-report.json
 
-        gitleaks detect \
-        --no-git \
-        --source . \
-        --report-format json \
-        --report-path reports/gitleaks-report.json \
-        --redact \
-        --exit-code 0
+    gitleaks detect \
+    --no-git \
+    --source . \
+    --report-format json \
+    --report-path reports/gitleaks-report.json \
+    --redact \
+    --exit-code 0 \
+    --exclude-path .gitleaksignore
 
-        echo "=================================================="
-        echo "GITLEAKS SCAN COMPLETED"
-        echo "=================================================="
+    echo "=================================================="
+    echo "GITLEAKS SCAN COMPLETED"
+    echo "=================================================="
 
     # =====================================================
     # INSTALL CHECKOV

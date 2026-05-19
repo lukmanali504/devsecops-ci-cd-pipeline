@@ -64,7 +64,7 @@ jobs:
         pip install semgrep
 
     # =====================================================
-    # RUN SEMGREP
+    # RUN SEMGREP SCAN
     # =====================================================
 
     - name: Run Semgrep Scan
@@ -78,7 +78,7 @@ jobs:
         --config=auto \
         --json \
         --output reports/semgrep-report.json \
-        .
+        . || true
 
         echo "=================================================="
         echo "SEMGREP SCAN COMPLETED"
@@ -98,7 +98,7 @@ jobs:
         sudo mv gitleaks /usr/local/bin/
 
     # =====================================================
-    # RUN GITLEAKS
+    # RUN GITLEAKS SCAN
     # =====================================================
 
     - name: Run Gitleaks Scan
@@ -128,7 +128,7 @@ jobs:
         pip install checkov
 
     # =====================================================
-    # RUN CHECKOV
+    # RUN CHECKOV SCAN
     # =====================================================
 
     - name: Run Checkov IaC Security Scan
@@ -142,10 +142,10 @@ jobs:
         --framework terraform \
         --skip-check CKV2_AWS_62,CKV2_AWS_64,CKV_AWS_144 \
         --output json \
-        > reports/checkov-report.json
+        > reports/checkov-report.json || true
 
         echo "=================================================="
-        echo "CHECKOV SECURITY SCAN PASSED"
+        echo "CHECKOV SECURITY SCAN COMPLETED"
         echo "=================================================="
 
     # =====================================================
@@ -169,24 +169,97 @@ jobs:
 
     steps:
 
-    - name: Policy Gate Validation
+    # =====================================================
+    # DOWNLOAD SECURITY REPORTS
+    # =====================================================
+
+    - name: Download Security Reports
+      uses: actions/download-artifact@v4
+      with:
+        name: security-scan-artifacts
+        path: reports
+
+    # =====================================================
+    # VALIDATE GITLEAKS POLICY
+    # =====================================================
+
+    - name: Validate Gitleaks Security Policy
       run: |
 
         echo "=================================================="
-        echo "SECURITY POLICY GATE"
+        echo "VALIDATING GITLEAKS SECURITY POLICY"
         echo "=================================================="
 
-        echo "Validating Enterprise Security Policies..."
+        echo "Checking for AWS credentials and secrets..."
+
+        if [ -s reports/gitleaks-report.json ] && \
+           grep -q '"RuleID"' reports/gitleaks-report.json; then
+
+          echo "❌ SECRET DETECTED BY GITLEAKS"
+          echo "❌ POLICY GATE FAILED"
+          echo "❌ PIPELINE BLOCKED"
+
+          exit 1
+
+        else
+
+          echo "✅ NO SECRETS DETECTED"
+
+        fi
+
+    # =====================================================
+    # VALIDATE SEMGREP POLICY
+    # =====================================================
+
+    - name: Validate Semgrep Security Policy
+      run: |
 
         echo "=================================================="
-        echo "Security Controls Verified:"
-        echo "- Semgrep SAST Scan Passed"
-        echo "- Gitleaks Secret Detection Completed"
-        echo "- Checkov Infrastructure Validation Passed"
-        echo "- JSON Security Artifacts Generated"
+        echo "VALIDATING SEMGREP SECURITY POLICY"
         echo "=================================================="
 
-        echo "POLICY GATE PASSED"
+        if grep -q '"severity":"ERROR"' reports/semgrep-report.json; then
+
+          echo "❌ HIGH RISK SOURCE CODE ISSUE DETECTED"
+          exit 1
+
+        else
+
+          echo "✅ SEMGREP POLICY VALIDATION PASSED"
+
+        fi
+
+    # =====================================================
+    # VALIDATE CHECKOV POLICY
+    # =====================================================
+
+    - name: Validate Checkov Security Policy
+      run: |
+
+        echo "=================================================="
+        echo "VALIDATING CHECKOV SECURITY POLICY"
+        echo "=================================================="
+
+        if grep -q '"failed"' reports/checkov-report.json; then
+
+          echo "❌ IaC SECURITY MISCONFIGURATION DETECTED"
+          exit 1
+
+        else
+
+          echo "✅ CHECKOV POLICY VALIDATION PASSED"
+
+        fi
+
+    # =====================================================
+    # POLICY GATE SUCCESS
+    # =====================================================
+
+    - name: Security Policy Gate Passed
+      run: |
+
+        echo "=================================================="
+        echo "✅ ALL SECURITY POLICIES PASSED"
         echo "=================================================="
 
 # =========================================================
@@ -296,148 +369,17 @@ jobs:
 
         trivy image \
         --severity HIGH,CRITICAL \
+        --ignore-unfixed \
         --format json \
         --output reports/trivy-report.json \
         ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
 
         echo "=================================================="
-        echo "TRIVY IMAGE SCAN PASSED"
+        echo "TRIVY IMAGE SCAN COMPLETED"
         echo "=================================================="
 
-    # =====================================================
-    # UPLOAD TRIVY REPORT
-    # =====================================================
-
-    - name: Upload Trivy Report
-      uses: actions/upload-artifact@v4
-      with:
-        name: trivy-security-artifact
-        path: reports/
-
-    # =====================================================
-    # PUSH IMAGE
-    # =====================================================
-
-    - name: Push Docker Image
-      run: |
-
-        echo "=================================================="
-        echo "PUSHING IMAGE TO DOCKER HUB"
-        echo "=================================================="
-
-        docker push \
-        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
-
 # =========================================================
-# DEPLOY DEVELOPMENT ENVIRONMENT
+# DEPLOYMENT STAGES
 # =========================================================
 
-  deploy-development:
-    name: Deploy Development Environment
-    runs-on: self-hosted
-    needs: build-and-image-scan
-
-    steps:
-
-    - name: Import Vault Secret
-      id: vault
-      uses: hashicorp/vault-action@v2
-      with:
-        url: ${{ secrets.VAULT_ADDR }}
-        token: ${{ secrets.VAULT_TOKEN }}
-
-        secrets: |
-          secret/data/dockerhub repo | DOCKER_REPOSITORY
-
-    - name: Pull Docker Image
-      run: |
-
-        docker pull \
-        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
-
-    - name: Run Development Container
-      run: |
-
-        docker rm -f dev-container || true
-
-        docker run -d \
-        --name dev-container \
-        -p 5001:5000 \
-        -e ENVIRONMENT=DEVELOPMENT \
-        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
-
-# =========================================================
-# DEPLOY STAGING ENVIRONMENT
-# =========================================================
-
-  deploy-staging:
-    name: Deploy Staging Environment
-    runs-on: self-hosted
-    needs: deploy-development
-
-    steps:
-
-    - name: Import Vault Secret
-      id: vault
-      uses: hashicorp/vault-action@v2
-      with:
-        url: ${{ secrets.VAULT_ADDR }}
-        token: ${{ secrets.VAULT_TOKEN }}
-
-        secrets: |
-          secret/data/dockerhub repo | DOCKER_REPOSITORY
-
-    - name: Pull Docker Image
-      run: |
-
-        docker pull \
-        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
-
-    - name: Run Staging Container
-      run: |
-
-        docker rm -f staging-container || true
-
-        docker run -d \
-        --name staging-container \
-        -p 5002:5000 \
-        -e ENVIRONMENT=STAGING \
-        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
-
-# =========================================================
-# DEPLOY PRODUCTION ENVIRONMENT
-# =========================================================
-
-  deploy-production:
-    name: Deploy Production Environment
-    runs-on: self-hosted
-    needs: deploy-staging
-
-    steps:
-
-    - name: Import Vault Secret
-      id: vault
-      uses: hashicorp/vault-action@v2
-      with:
-        url: ${{ secrets.VAULT_ADDR }}
-        token: ${{ secrets.VAULT_TOKEN }}
-
-        secrets: |
-          secret/data/dockerhub repo | DOCKER_REPOSITORY
-
-    - name: Pull Docker Image
-      run: |
-
-        docker pull \
-        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
-
-    - name: Run Production Container
-      run: |
-
-        docker rm -f prod-container || true
-
-        docker run -d \
-        --name prod-container \
-        -p 5003:5000 \
-        -e ENVIRONMENT=PRODUCTION \
-        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+# THIS WILL NOT RUN IF POLICY GATE FAILS

@@ -14,7 +14,7 @@ env:
 jobs:
 
 # =========================================================
-# SECURITY SCANS
+# STAGE 1 - SECURITY SCANS
 # =========================================================
 
   security-scans:
@@ -48,11 +48,17 @@ jobs:
         pip install -r requirements.txt
 
     # =====================================================
-    # CREATE REPORT DIRECTORY
+    # CLEAN OLD REPORTS
     # =====================================================
 
-    - name: Create Reports Directory
+    - name: Clean Old Reports
       run: |
+
+        echo "=================================================="
+        echo "CLEANING OLD SECURITY REPORTS"
+        echo "=================================================="
+
+        rm -rf reports
         mkdir -p reports
 
     # =====================================================
@@ -108,7 +114,10 @@ jobs:
         echo "RUNNING GITLEAKS SECRET SCAN"
         echo "=================================================="
 
+        rm -f reports/gitleaks-report.json
+
         gitleaks detect \
+        --no-git \
         --source . \
         --report-format json \
         --report-path reports/gitleaks-report.json \
@@ -138,6 +147,8 @@ jobs:
         echo "RUNNING CHECKOV IaC SECURITY SCAN"
         echo "=================================================="
 
+        rm -f reports/checkov-report.json
+
         checkov -d terraform \
         --framework terraform \
         --skip-check CKV2_AWS_62,CKV2_AWS_64,CKV_AWS_144 \
@@ -159,7 +170,7 @@ jobs:
         path: reports/
 
 # =========================================================
-# SECURITY POLICY GATE
+# STAGE 2 - SECURITY POLICY GATE
 # =========================================================
 
   policy-gate:
@@ -170,7 +181,17 @@ jobs:
     steps:
 
     # =====================================================
-    # DOWNLOAD SECURITY REPORTS
+    # CLEAN POLICY REPORTS
+    # =====================================================
+
+    - name: Clean Existing Reports
+      run: |
+
+        rm -rf reports
+        mkdir -p reports
+
+    # =====================================================
+    # DOWNLOAD REPORTS
     # =====================================================
 
     - name: Download Security Reports
@@ -180,17 +201,28 @@ jobs:
         path: reports
 
     # =====================================================
-    # VALIDATE GITLEAKS POLICY
+    # VERIFY REPORTS
     # =====================================================
 
-    - name: Validate Gitleaks Security Policy
+    - name: Verify Reports
       run: |
 
         echo "=================================================="
-        echo "VALIDATING GITLEAKS SECURITY POLICY"
+        echo "VERIFYING SECURITY REPORTS"
         echo "=================================================="
 
-        echo "Checking for AWS credentials and secrets..."
+        ls -la reports/
+
+    # =====================================================
+    # VALIDATE GITLEAKS POLICY
+    # =====================================================
+
+    - name: Validate Gitleaks Policy
+      run: |
+
+        echo "=================================================="
+        echo "VALIDATING GITLEAKS POLICY"
+        echo "=================================================="
 
         if [ -s reports/gitleaks-report.json ] && \
            grep -q '"RuleID"' reports/gitleaks-report.json; then
@@ -203,7 +235,7 @@ jobs:
 
         else
 
-          echo "✅ NO SECRETS DETECTED"
+          echo "✅ GITLEAKS POLICY PASSED"
 
         fi
 
@@ -211,21 +243,21 @@ jobs:
     # VALIDATE SEMGREP POLICY
     # =====================================================
 
-    - name: Validate Semgrep Security Policy
+    - name: Validate Semgrep Policy
       run: |
 
         echo "=================================================="
-        echo "VALIDATING SEMGREP SECURITY POLICY"
+        echo "VALIDATING SEMGREP POLICY"
         echo "=================================================="
 
         if grep -q '"severity":"ERROR"' reports/semgrep-report.json; then
 
-          echo "❌ HIGH RISK SOURCE CODE ISSUE DETECTED"
+          echo "❌ HIGH RISK CODE ISSUE DETECTED"
           exit 1
 
         else
 
-          echo "✅ SEMGREP POLICY VALIDATION PASSED"
+          echo "✅ SEMGREP POLICY PASSED"
 
         fi
 
@@ -233,11 +265,11 @@ jobs:
     # VALIDATE CHECKOV POLICY
     # =====================================================
 
-    - name: Validate Checkov Security Policy
+    - name: Validate Checkov Policy
       run: |
 
         echo "=================================================="
-        echo "VALIDATING CHECKOV SECURITY POLICY"
+        echo "VALIDATING CHECKOV POLICY"
         echo "=================================================="
 
         if grep -q '"failed"' reports/checkov-report.json; then
@@ -247,15 +279,15 @@ jobs:
 
         else
 
-          echo "✅ CHECKOV POLICY VALIDATION PASSED"
+          echo "✅ CHECKOV POLICY PASSED"
 
         fi
 
     # =====================================================
-    # POLICY GATE SUCCESS
+    # POLICY GATE PASSED
     # =====================================================
 
-    - name: Security Policy Gate Passed
+    - name: Policy Gate Passed
       run: |
 
         echo "=================================================="
@@ -263,7 +295,7 @@ jobs:
         echo "=================================================="
 
 # =========================================================
-# BUILD IMAGE AND IMAGE SECURITY SCAN
+# STAGE 3 - BUILD IMAGE & IMAGE SCAN
 # =========================================================
 
   build-and-image-scan:
@@ -281,11 +313,13 @@ jobs:
       uses: actions/checkout@v4
 
     # =====================================================
-    # CREATE REPORT DIRECTORY
+    # CLEAN REPORTS
     # =====================================================
 
-    - name: Create Reports Directory
+    - name: Clean Reports
       run: |
+
+        rm -rf reports
         mkdir -p reports
 
     # =====================================================
@@ -305,7 +339,7 @@ jobs:
           secret/data/dockerhub repo | DOCKER_REPOSITORY
 
     # =====================================================
-    # LOGIN TO DOCKER HUB
+    # DOCKER LOGIN
     # =====================================================
 
     - name: Docker Login
@@ -315,7 +349,7 @@ jobs:
         password: ${{ steps.vault.outputs.DOCKER_PASSWORD }}
 
     # =====================================================
-    # BUILD DOCKER IMAGE
+    # BUILD IMAGE
     # =====================================================
 
     - name: Build Docker Image
@@ -328,10 +362,6 @@ jobs:
         docker build --no-cache \
         -t ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest .
 
-        echo "=================================================="
-        echo "DOCKER IMAGE BUILD COMPLETED"
-        echo "=================================================="
-
     # =====================================================
     # INSTALL TRIVY
     # =====================================================
@@ -340,7 +370,6 @@ jobs:
       run: |
 
         sudo apt-get update -y
-
         sudo apt-get install wget apt-transport-https gnupg lsb-release -y
 
         wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | \
@@ -353,7 +382,6 @@ jobs:
         sudo tee /etc/apt/sources.list.d/trivy.list
 
         sudo apt-get update -y
-
         sudo apt-get install trivy -y
 
     # =====================================================
@@ -364,7 +392,7 @@ jobs:
       run: |
 
         echo "=================================================="
-        echo "RUNNING TRIVY IMAGE SECURITY SCAN"
+        echo "RUNNING TRIVY IMAGE SCAN"
         echo "=================================================="
 
         trivy image \
@@ -374,12 +402,152 @@ jobs:
         --output reports/trivy-report.json \
         ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
 
+    # =====================================================
+    # VALIDATE TRIVY POLICY
+    # =====================================================
+
+    - name: Validate Trivy Policy
+      run: |
+
         echo "=================================================="
-        echo "TRIVY IMAGE SCAN COMPLETED"
+        echo "VALIDATING TRIVY POLICY"
         echo "=================================================="
 
+        if grep -q '"Severity":"CRITICAL"' reports/trivy-report.json; then
+
+          echo "❌ CRITICAL IMAGE VULNERABILITY DETECTED"
+          exit 1
+
+        else
+
+          echo "✅ TRIVY POLICY PASSED"
+
+        fi
+
+    # =====================================================
+    # PUSH IMAGE
+    # =====================================================
+
+    - name: Push Docker Image
+      run: |
+
+        echo "=================================================="
+        echo "PUSHING IMAGE TO DOCKER HUB"
+        echo "=================================================="
+
+        docker push \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
 # =========================================================
-# DEPLOYMENT STAGES
+# STAGE 4 - DEVELOPMENT DEPLOYMENT
 # =========================================================
 
-# THIS WILL NOT RUN IF POLICY GATE FAILS
+  deploy-development:
+    name: Deploy Development Environment
+    runs-on: self-hosted
+    needs: build-and-image-scan
+
+    steps:
+
+    - name: Import Vault Secret
+      id: vault
+      uses: hashicorp/vault-action@v2
+      with:
+        url: ${{ secrets.VAULT_ADDR }}
+        token: ${{ secrets.VAULT_TOKEN }}
+
+        secrets: |
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
+
+    - name: Pull Docker Image
+      run: |
+
+        docker pull \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+    - name: Deploy Development Container
+      run: |
+
+        docker rm -f dev-container || true
+
+        docker run -d \
+        --name dev-container \
+        -p 5001:5000 \
+        -e ENVIRONMENT=DEVELOPMENT \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+# =========================================================
+# STAGE 5 - STAGING DEPLOYMENT
+# =========================================================
+
+  deploy-staging:
+    name: Deploy Staging Environment
+    runs-on: self-hosted
+    needs: deploy-development
+
+    steps:
+
+    - name: Import Vault Secret
+      id: vault
+      uses: hashicorp/vault-action@v2
+      with:
+        url: ${{ secrets.VAULT_ADDR }}
+        token: ${{ secrets.VAULT_TOKEN }}
+
+        secrets: |
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
+
+    - name: Pull Docker Image
+      run: |
+
+        docker pull \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+    - name: Deploy Staging Container
+      run: |
+
+        docker rm -f staging-container || true
+
+        docker run -d \
+        --name staging-container \
+        -p 5002:5000 \
+        -e ENVIRONMENT=STAGING \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+# =========================================================
+# STAGE 6 - PRODUCTION DEPLOYMENT
+# =========================================================
+
+  deploy-production:
+    name: Deploy Production Environment
+    runs-on: self-hosted
+    needs: deploy-staging
+
+    steps:
+
+    - name: Import Vault Secret
+      id: vault
+      uses: hashicorp/vault-action@v2
+      with:
+        url: ${{ secrets.VAULT_ADDR }}
+        token: ${{ secrets.VAULT_TOKEN }}
+
+        secrets: |
+          secret/data/dockerhub repo | DOCKER_REPOSITORY
+
+    - name: Pull Docker Image
+      run: |
+
+        docker pull \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest
+
+    - name: Deploy Production Container
+      run: |
+
+        docker rm -f prod-container || true
+
+        docker run -d \
+        --name prod-container \
+        -p 5003:5000 \
+        -e ENVIRONMENT=PRODUCTION \
+        ${{ steps.vault.outputs.DOCKER_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest

@@ -55,7 +55,7 @@ jobs:
       run: |
 
         echo "=================================================="
-        echo "CLEANING OLD SECURITY REPORTS"
+        echo "CLEANING OLD REPORTS"
         echo "=================================================="
 
         rm -rf reports
@@ -77,7 +77,7 @@ jobs:
       run: |
 
         echo "=================================================="
-        echo "RUNNING SEMGREP SOURCE CODE SECURITY SCAN"
+        echo "RUNNING SEMGREP SCAN"
         echo "=================================================="
 
         semgrep \
@@ -111,7 +111,7 @@ jobs:
       run: |
 
         echo "=================================================="
-        echo "RUNNING GITLEAKS SECRET SCAN"
+        echo "RUNNING GITLEAKS SCAN"
         echo "=================================================="
 
         rm -f reports/gitleaks-report.json
@@ -140,11 +140,11 @@ jobs:
     # RUN CHECKOV SCAN
     # =====================================================
 
-    - name: Run Checkov IaC Security Scan
+    - name: Run Checkov Scan
       run: |
 
         echo "=================================================="
-        echo "RUNNING CHECKOV IaC SECURITY SCAN"
+        echo "RUNNING CHECKOV SCAN"
         echo "=================================================="
 
         rm -f reports/checkov-report.json
@@ -156,11 +156,11 @@ jobs:
         > reports/checkov-report.json || true
 
         echo "=================================================="
-        echo "CHECKOV SECURITY SCAN COMPLETED"
+        echo "CHECKOV SCAN COMPLETED"
         echo "=================================================="
 
     # =====================================================
-    # UPLOAD SECURITY REPORTS
+    # UPLOAD REPORTS
     # =====================================================
 
     - name: Upload Security Reports
@@ -181,11 +181,15 @@ jobs:
     steps:
 
     # =====================================================
-    # CLEAN POLICY REPORTS
+    # CLEAN REPORTS
     # =====================================================
 
     - name: Clean Existing Reports
       run: |
+
+        echo "=================================================="
+        echo "CLEANING POLICY REPORTS"
+        echo "=================================================="
 
         rm -rf reports
         mkdir -p reports
@@ -208,7 +212,7 @@ jobs:
       run: |
 
         echo "=================================================="
-        echo "VERIFYING SECURITY REPORTS"
+        echo "VERIFYING REPORT FILES"
         echo "=================================================="
 
         ls -la reports/
@@ -224,8 +228,9 @@ jobs:
         echo "VALIDATING GITLEAKS POLICY"
         echo "=================================================="
 
-        if [ -s reports/gitleaks-report.json ] && \
-           grep -q '"RuleID"' reports/gitleaks-report.json; then
+        cat reports/gitleaks-report.json
+
+        if grep -q '"Secret"' reports/gitleaks-report.json; then
 
           echo "❌ SECRET DETECTED BY GITLEAKS"
           echo "❌ POLICY GATE FAILED"
@@ -235,6 +240,7 @@ jobs:
 
         else
 
+          echo "✅ NO SECRETS DETECTED"
           echo "✅ GITLEAKS POLICY PASSED"
 
         fi
@@ -284,7 +290,7 @@ jobs:
         fi
 
     # =====================================================
-    # POLICY GATE PASSED
+    # POLICY GATE SUCCESS
     # =====================================================
 
     - name: Policy Gate Passed
@@ -295,7 +301,7 @@ jobs:
         echo "=================================================="
 
 # =========================================================
-# STAGE 3 - BUILD IMAGE & IMAGE SCAN
+# STAGE 3 - BUILD IMAGE & IMAGE SECURITY SCAN
 # =========================================================
 
   build-and-image-scan:
@@ -370,6 +376,7 @@ jobs:
       run: |
 
         sudo apt-get update -y
+
         sudo apt-get install wget apt-transport-https gnupg lsb-release -y
 
         wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | \
@@ -382,13 +389,14 @@ jobs:
         sudo tee /etc/apt/sources.list.d/trivy.list
 
         sudo apt-get update -y
+
         sudo apt-get install trivy -y
 
     # =====================================================
-    # RUN TRIVY IMAGE SCAN
+    # RUN TRIVY SCAN
     # =====================================================
 
-    - name: Run Trivy Docker Image Scan
+    - name: Run Trivy Image Scan
       run: |
 
         echo "=================================================="
